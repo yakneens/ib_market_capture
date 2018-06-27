@@ -20,6 +20,11 @@ Base.prepare(engine, reflect=True)
 meta = MetaData()
 meta.reflect(bind=engine)
 
+contract_timestamp_table = meta.tables["contract_ib_first_timestamp"]
+contract_table = meta.tables["contracts"]
+contract_daily_bar_table = meta.tables["contract_daily_bars"]
+equity_contract_table = meta.tables["equity_contracts"]
+
 session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 Session = scoped_session(session_factory)
 Base.query = Session.query_property()
