@@ -13,8 +13,10 @@ import util.logging as my_log
 
 from collections import namedtuple
 
+import time
+
 OptionTickGetterSettings = namedtuple('OptionTickGetterSettings',
-                                     'what_to_show, influx_measurement, log_filename, days_to_expiry_cutoff, priorities')
+                                     'what_to_show, influx_measurement, log_filename, days_to_expiry_cutoff, priorities,restart_period')
 
 class OptionTickGetter:
 
@@ -58,56 +60,63 @@ class OptionTickGetter:
                                             local_symbol=contract.localSymbol)
 
     async def get_ticks(self):
-        for (priority_number, priority_sub) in self.settings.priorities:
-            self.logger.info(f"Processing priority {priority_number}")
+        while True:
+            start_time = time.time()
+            for (priority_number, priority_sub) in self.settings.priorities:
+                if time.time() - start_time > self.settings.restart_period:
+                    self.logger.info("Timer elapsed, restarting.")
+                    break
 
-            con_df = self.get_daily_bars(priority_sub)
+                self.logger.info(f"Processing priority {priority_number}")
 
-            num_rows = len(con_df)
+                con_df = self.get_daily_bars(priority_sub)
 
-            for index, row in con_df.iterrows():
+                num_rows = len(con_df)
 
-                self.logger.info(f"Processing contract {index}/{num_rows}  {row.localSymbol} for {row.date} with volume {row.volume}")
-                cur_date = row.date.replace(hour=0, minute=0, second=0)
+                for index, row in con_df.iterrows():
 
-                if isinstance(cur_date, pd.Timestamp):
-                    cur_date = cur_date.to_pydatetime()
+                    self.logger.info(f"Processing contract {index}/{num_rows}  {row.localSymbol} for {row.date} with volume {row.volume}")
+                    cur_date = row.date.replace(hour=0, minute=0, second=0)
 
-                tickList = []
+                    if isinstance(cur_date, pd.Timestamp):
+                        cur_date = cur_date.to_pydatetime()
 
-                this_contract = Option(conId=row.conId, exchange=row.exchange)
+                    tickList = []
 
-                while True:
-                    try:
-                        async with self.option_tick_sema:
-                            self.request_ids.append(self.ib.client._reqIdSeq)
-                            ticks = await self.ib.reqHistoricalTicksAsync(this_contract, cur_date, None, 1000, 'TRADES',
-                                                                          useRth=False)
-                    except:
-                        self.logger.info("Couldn't get ticks")
-                        raise
-                    tickList.append(ticks)
+                    this_contract = Option(conId=row.conId, exchange=row.exchange)
 
-                    if len(ticks) >= 1000:
-                        cur_date = ticks[-1].time + datetime.timedelta(seconds=1)
-                    else:
-                        break
+                    while True:
+                        try:
+                            async with self.option_tick_sema:
+                                self.request_ids.append(self.ib.client._reqIdSeq)
+                                ticks = await self.ib.reqHistoricalTicksAsync(this_contract, cur_date, None, 1000, 'TRADES',
+                                                                              useRth=False)
+                        except:
+                            self.logger.info("Couldn't get ticks")
+                            raise
+                        tickList.append(ticks)
 
-                if len(tickList) > 0:
-                    allTicks = [t for ticks in tickList for t in ticks]
-                    if allTicks:
-                        tick_df = util.df(allTicks)
-
-                        if not tick_df.empty:
-                            self.logger.info("Writing to Influx")
-                            await self.write_to_influx(tick_df, row)
-
-                            self.logger.info("Writing to DB")
-                           #self.update_ticks_retrieved(row.dailyBarId)
+                        if len(ticks) >= 1000:
+                            cur_date = ticks[-1].time + datetime.timedelta(seconds=1)
                         else:
-                            self.logger.info("No ticks found")
+                            break
+
+                    if len(tickList) > 0:
+                        allTicks = [t for ticks in tickList for t in ticks]
+                        if allTicks:
+                            tick_df = util.df(allTicks)
+
+                            if not tick_df.empty:
+                                self.logger.info("Writing to Influx")
+                                await self.write_to_influx(tick_df, row)
+
+                                self.logger.info("Writing to DB")
+                               #TODO - Uncomment this after testing.
+                               #self.update_ticks_retrieved(row.dailyBarId)
+                            else:
+                                self.logger.info("No ticks found")
+                        else:
+                            self.logger.info("Allticks was empty")
                     else:
-                        self.logger.info("Allticks was empty")
-                else:
-                    self.logger.info("No ticks found")
+                        self.logger.info("No ticks found")
 

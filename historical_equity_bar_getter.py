@@ -13,10 +13,11 @@ from collections import namedtuple
 
 HistoricalEquityBarGetterSettings = namedtuple('HistoricalEquityBarGetterSettings',
                              'db_table, influx_measurement, lookback_period, bar_size, skip_list, update_colname, retry_offsets, log_filename, sleep_duration')
-RetryOffset = namedtuple('RetryOffest', 'num_retries, offset')
+RetryOffset = namedtuple('RetryOffset', 'num_retries, offset')
 
 class HistoricalEquityBarGetter:
-    def __init__(self, ib: IB, settings: HistoricalEquityBarGetterSettings):
+
+    def __init__(self, ib, settings):
         self.settings = settings
 
         self.logger = my_log.SetupLogger(self.settings.log_filename)
@@ -155,6 +156,5 @@ class HistoricalEquityBarGetter:
 
                 await asyncio.sleep(self.settings.sleep_duration)
 
-    def __new__(cls) -> Any:
-        return super().__new__(cls)
+
 
