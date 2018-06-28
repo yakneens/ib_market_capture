@@ -11,18 +11,21 @@ from util import connection as db
 import asyncio
 import util.logging as my_log
 
-OPTION_TICK_GETTER = 3
+from collections import namedtuple
 
+OptionTickGetterSettings = namedtuple('OptionTickGetterSettings',
+                                     'what_to_show, influx_measurement, log_filename, days_to_expiry_cutoff, priorities')
 
 class OptionTickGetter:
 
-    def __init__(self, ib, requests):
-        self.logger = my_log.SetupLogger("get_option_ticks")
+    def __init__(self, ib: IB, settings: OptionTickGetterSettings):
+        self.settings = settings
+        self.logger = my_log.SetupLogger(self.settings.log_filename)
         self.logger.setLevel(logging.INFO)
         self.logger.info("now is %s", datetime.datetime.now())
 
         self.ib = ib
-        self.requests = requests
+        self.request_ids = []
         self.option_tick_sema = asyncio.Semaphore(1)
 
     query_template = 'select c.*, b."dailyBarId", b."date", b.volume from contracts c ' \
@@ -32,15 +35,10 @@ class OptionTickGetter:
                      'DATE_PART(\'day\', c."lastTradeDateOrContractMonth" :: timestamp with time zone - now())  >= -2 ' \
                      'order by c."lastTradeDateOrContractMonth", c.priority, b.volume desc;'
 
-    days_to_expiry_cutoff = '10'
 
-    priorities = [(1, ' b.volume > 1000 '),
-                  (2, ' b.volume <= 1000 and b.volume > 500 '),
-                  (3, ' b.volume <= 500 and b.volume > 100 '),
-                  (4, ' b.volume <= 100 ')]
 
     def get_daily_bars(self, priority):
-        query = self.query_template.format(priority, self.days_to_expiry_cutoff)
+        query = self.query_template.format(priority, self.settings.days_to_expiry_cutoff)
         return pd.read_sql(query, db.engine)
 
     def update_ticks_retrieved(self, dailyBarId):
@@ -51,7 +49,7 @@ class OptionTickGetter:
     async def write_to_influx(self, tick_df, contract):
         tick_df = tick_df.set_index('time')
         return await db.influx_client.write(tick_df,
-                                            measurement='test',
+                                            measurement=self.settings.influx_measurement,
                                             symbol=contract.symbol,
                                             expiry=str(contract.lastTradeDateOrContractMonth.split(" ")[0]),
                                             contractId=str(contract.conId),
@@ -60,8 +58,7 @@ class OptionTickGetter:
                                             local_symbol=contract.localSymbol)
 
     async def get_ticks(self):
-        for (priority_number, priority_sub) in self.priorities:
-            #print.(f"Processing priority {priority_number}")
+        for (priority_number, priority_sub) in self.settings.priorities:
             self.logger.info(f"Processing priority {priority_number}")
 
             con_df = self.get_daily_bars(priority_sub)
@@ -70,7 +67,6 @@ class OptionTickGetter:
 
             for index, row in con_df.iterrows():
 
-                #print.(f"Processing contract {index}/{num_rows} {row.localSymbol} for {row.date} with volume {row.volume}")
                 self.logger.info(f"Processing contract {index}/{num_rows}  {row.localSymbol} for {row.date} with volume {row.volume}")
                 cur_date = row.date.replace(hour=0, minute=0, second=0)
 
@@ -84,12 +80,11 @@ class OptionTickGetter:
                 while True:
                     try:
                         async with self.option_tick_sema:
-                            self.requests[self.ib.client._reqIdSeq] = OPTION_TICK_GETTER
+                            self.request_ids.append(self.ib.client._reqIdSeq)
                             ticks = await self.ib.reqHistoricalTicksAsync(this_contract, cur_date, None, 1000, 'TRADES',
                                                                           useRth=False)
                     except:
                         self.logger.info("Couldn't get ticks")
-                        #print.("Couldn't get ticks")
                         raise
                     tickList.append(ticks)
 
@@ -104,20 +99,15 @@ class OptionTickGetter:
                         tick_df = util.df(allTicks)
 
                         if not tick_df.empty:
-                            #print.("Writing to Influx")
                             self.logger.info("Writing to Influx")
                             await self.write_to_influx(tick_df, row)
 
                             self.logger.info("Writing to DB")
-                            #print.("Writing to DB")
-                            # self.update_ticks_retrieved(row.dailyBarId)
+                           #self.update_ticks_retrieved(row.dailyBarId)
                         else:
-                            #print.("No ticks found")
                             self.logger.info("No ticks found")
                     else:
                         self.logger.info("Allticks was empty")
-                        #print.("Allticks was empty")
-
                 else:
                     self.logger.info("No ticks found")
-                    #print.("No ticks found")
+

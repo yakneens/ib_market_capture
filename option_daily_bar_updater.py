@@ -7,16 +7,23 @@ import asyncio
 import logging
 import util.logging as my_log
 
-OPTION_DAILY_BAR_UPDATER = 4
+from collections import namedtuple
+
+OptionBarUpdaterSettings = namedtuple('OptionBarUpdaterSettings',
+                                     'bar_size, what_to_show, db_table, influx_measurement, cant_get_bars_col, load_date_col, log_filename')
+
 
 class OptionDailyBarUpdater:
-    def __init__(self, ib, requests):
-        self.logger = my_log.SetupLogger("update_option_daily_bars")
+    def __init__(self, ib: IB, settings: OptionBarUpdaterSettings):
+
+        self.settings = settings
+
+        self.logger = my_log.SetupLogger(self.settings.log_filename)
         self.logger.setLevel(logging.INFO)
         self.logger.info("now is %s", datetime.datetime.now())
 
         self.ib = ib
-        self.requests = requests
+        self.request_ids = []
         self.option_daily_bar_update_sema = asyncio.Semaphore(1)
 
 
@@ -29,27 +36,24 @@ class OptionDailyBarUpdater:
         bar_df['addedOn'] = datetime.datetime.now()
         return bar_df
 
-    @staticmethod
-    def filter_existing(my_bars, conId):
-        query = f'select date from contract_daily_bars where "conId" = {conId}'
+    def filter_existing(self, my_bars, conId):
+        query = f'select date from {self.settings.db_table} where "conId" = {conId}'
         existing_dates = pd.read_sql(query, db.engine)['date']
         return my_bars.query('date not in @existing_dates')
 
-    @staticmethod
-    def save_to_db(bars, conId):
+    def save_to_db(self, bars, conId):
         bars['date'] = bars['date'].astype(pd.Timestamp)
-        bars.to_sql("contract_daily_bars", db.engine, if_exists="append", index=False, dtype={'date': TIMESTAMP(timezone=True)})
+        bars.to_sql(self.settings.db_table, db.engine, if_exists="append", index=False, dtype={'date': TIMESTAMP(timezone=True)})
 
-    @staticmethod
-    def update_load_date(conId):
+    def update_load_date(self, conId):
         result = db.engine.execute(db.contract_table.update().where(db.contract_table.c.conId == conId).values(
-            daily_bar_load_date=datetime.datetime.now()))
+            {self.settings.load_date_col: datetime.datetime.now()}))
 
-    @staticmethod
-    async def save_to_influx(bars, contract):
+
+    async def save_to_influx(self, bars, contract):
         bars = bars.set_index('date')
         return await db.influx_client.write(bars,
-                            measurement='option_daily_bars',
+                            measurement=self.settings.influx_measurement,
                             symbol=contract.symbol,
                             expiry=str(contract.lastTradeDateOrContractMonth.split(" ")[0]),
                             contractId=str(contract.conId),
@@ -57,14 +61,13 @@ class OptionDailyBarUpdater:
                             right=contract.right,
                             local_symbol=contract.localSymbol)
 
-    @staticmethod
-    def get_updateable_contracts():
+    def get_updateable_contracts(self):
         query = 'select c2.*, b."lastDate" from contracts c2 join (select max(date) as "lastDate", b."conId"' \
-                'from contract_daily_bars b join contracts c on b."conId" = c."conId"' \
+                'from {} b join contracts c on b."conId" = c."conId"' \
                 'where DATE_PART(\'day\', c."lastTradeDateOrContractMonth" :: timestamp with time zone - now()) < 10 and ' \
                 'c.expired is not true and ' \
-                'DATE_PART(\'day\', now() - c."daily_bar_load_date" :: timestamp with time zone) > 0 ' \
-                'group by b."conId") b on c2."conId" = b."conId" order by c2."lastTradeDateOrContractMonth", c2.priority;'
+                'DATE_PART(\'day\', now() - c."{}" :: timestamp with time zone) > 0 ' \
+                'group by b."conId") b on c2."conId" = b."conId" order by c2."lastTradeDateOrContractMonth", c2.priority;'.format(self.settings.db_table, self.settings.load_date_col)
 
         return pd.read_sql(query, db.engine)
 
@@ -86,9 +89,9 @@ class OptionDailyBarUpdater:
             self.logger.info(f"{index}/{num_rows} {datetime.datetime.now()} Processing contract {row.localSymbol} {row.lastTradeDateOrContractMonth} {row.lastDate}")
             try:
                 async with self.option_daily_bar_update_sema:
-                    self.requests[self.ib.client._reqIdSeq] = OPTION_DAILY_BAR_UPDATER
+                    self.request_ids.append(self.ib.client._reqIdSeq)
                     my_bars = await self.ib.reqHistoricalDataAsync(my_con, endDateTime='', durationStr='{} D'.format(num_days),
-                                               barSizeSetting='8 hours', whatToShow='TRADES', useRTH=False, formatDate=2)
+                                               barSizeSetting=self.settings.bar_size, whatToShow=self.settings.what_to_show, useRTH=False, formatDate=2)
             except ValueError as e:
                 self.logger.error("Error getting historic bars for {} {}".format(row.localSymbol, e))
                 #print("Error getting historic bars for {} {}".format(row.localSymbol, e))

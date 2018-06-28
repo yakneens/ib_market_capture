@@ -5,30 +5,22 @@ import pandas as pd
 from ib_insync import *
 from sqlalchemy import update
 from util import connection as db
-from first_timestamp_getter import FirstTimestampGetter
-from option_daily_bar_getter import OptionDailyBarGetter
-from option_tick_getter import OptionTickGetter
-from option_daily_bar_updater import OptionDailyBarUpdater
-from historical_equity_bar_getter import HistoricalEquityBarGetter
-
+from first_timestamp_getter import FirstTimestampGetter, FirstTimestampSettings
+from option_daily_bar_getter import OptionDailyBarGetter, OptionBarGetterSettings
+from option_tick_getter import OptionTickGetter, OptionTickGetterSettings
+from option_daily_bar_updater import OptionDailyBarUpdater, OptionBarUpdaterSettings
+from historical_equity_bar_getter import HistoricalEquityBarGetter, HistoricalEquityBarGetterSettings, RetryOffset
+from live_futures_getter import LiveFuturesGetter, LiveFuturesSettings
 import os
 import random
 import asyncio
-
-FIRST_TIMESTAMP_GETTER = 1
-OPTION_DAILY_BAR_GETTER = 2
-OPTION_TICK_GETTER = 3
-OPTION_DAILY_BAR_UPDATER = 4
-HISTORICAL_EQUITY_BAR_GETTER = 5
-
-requests = {}
 
 
 def init_ib():
     ib = IB()
     ib.errorEvent += onError
     IB_PORT = os.environ.get("IB_PORT")
-    ib.connect('127.0.0.1', IB_PORT, clientId=int(random.random() * 100))
+    ib.connect('127.0.0.1', IB_PORT, clientId=1337)
     return ib
 
 
@@ -46,27 +38,124 @@ def onError(reqId, errorCode, errorString, contract):
     elif errorCode == 1102:
         print("Restarting after outage")
         # main()
-    elif errorCode == 162:
-        req_type = requests.get(reqId)
-        if req_type == OPTION_DAILY_BAR_GETTER:
-            print(f"Couldn't get data for {contract.conId}, setting cantGetDailyBars flag.")
-            OptionDailyBarGetter.set_cant_get_daily_bars_flag(contract.conId)
 
 
-async def my_main(ib, ):
-    try:
-        tasks = [FirstTimestampGetter(ib, requests).get_first_trade_date(),
-                 OptionDailyBarGetter(ib, requests).get_daily_bars(),
-                 OptionTickGetter(ib, requests).get_ticks(),
-                 OptionDailyBarUpdater(ib, requests).update_daily_bars(),
-                 HistoricalEquityBarGetter(ib, requests, "3_minutes").get_historical_equity_bars(),
-                 HistoricalEquityBarGetter(ib, requests, "1_second").get_historical_equity_bars()]
-        # tasks = [HistoricalEquityBarGetter(ib, requests, "3_minutes").get_historical_equity_bars(),
-        #          HistoricalEquityBarGetter(ib, requests, "1_second").get_historical_equity_bars()]
+def get_first_timestamp_settings():
+    return FirstTimestampSettings(log_filename="get_option_first_timestamp")
+
+
+def get_option_bar_getter_settings():
+    return OptionBarGetterSettings(bar_size="8 hours",
+                                   what_to_show="TRADES",
+                                   db_table="contract_daily_bars",
+                                   influx_measurement="contract_daily_bars",
+                                   log_filename="get_option_daily_bars",
+                                   cant_get_bars_col="cantGetDailyBars",
+                                   load_date_col="daily_bar_load_date")
+
+
+def get_option_tick_getter_settings():
+    return OptionTickGetterSettings(what_to_show="TRADES",
+                                    log_filename="get_option_ticks",
+                                    days_to_expiry_cutoff=10,
+                                    priorities=[(1, ' b.volume > 1000 '),
+                                                (2, ' b.volume <= 1000 and b.volume > 500 '),
+                                                (3, ' b.volume <= 500 and b.volume > 100 '),
+                                                (4, ' b.volume <= 100 ')])
+
+
+def get_option_bar_updater_settings():
+    return OptionBarUpdaterSettings(bar_size="8 hours",
+                                    what_to_show="TRADES",
+                                    db_table="contract_daily_bars",
+                                    influx_measurement="contract_daily_bars",
+                                    log_filename="get_option_daily_bars",
+                                    cant_get_bars_col="cantGetDailyBars",
+                                    load_date_col="daily_bar_load_date")
+
+
+def get_historical_3_minute_settings():
+    return HistoricalEquityBarGetterSettings(db_table='stock_3_min_bars',
+                                             influx_measurement='stock_3_min_bars',
+                                             lookback_period='20 D', bar_size='3 mins',
+                                             skip_list=["SPY", "QQQ", "EEM", "XLF", "GLD", "EFA", "IWM",
+                                                        "VXX", "FXI", "USO", "XOP",
+                                                        "HYG", "AAPL", "BAC", "MU", "FB", "BABA", "NVDA",
+                                                        "AMD", "GE", "TSLA", "NFLX", "AMZN"],
+                                             update_colname='threeMinuteBarsLoadedOn',
+                                             retry_offsets=[RetryOffset(10, datetime.timedelta(minutes=5)),
+                                                            RetryOffset(10, datetime.timedelta(hours=1)),
+                                                            RetryOffset(10, datetime.timedelta(days=1))],
+                                             log_filename='get_historical_3_minute_bars',
+                                             sleep_duration=0)
+
+
+def get_historical_1_second_settings():
+    return HistoricalEquityBarGetterSettings(db_table='stock_1_sec_bars',
+                                             influx_measurement='stock_1_sec_bars',
+                                             lookback_period='2000 S', bar_size='1 secs', skip_list=[],
+                                             update_colname='oneSecBarsLoadedOn',
+                                             retry_offsets=[RetryOffset(10, datetime.timedelta(minutes=1)),
+                                                            RetryOffset(10, datetime.timedelta(hours=1))],
+                                             log_filename='get_historical_1_second_bars',
+                                             sleep_duration=5)
+
+
+def get_live_futures_globex_settings():
+    return LiveFuturesSettings(tickers=["ES", "NQ", "RTY", "NKD", "LE", "HE", "GF"],
+                               exchange="GLOBEX",
+                               bar_size=5,
+                               whatToShow="TRADES",
+                               influx_measurement="futures_5_sec_bars_test",
+                               log_filename="get_live_futures")
+
+
+def get_live_futures_nymex_settings():
+    return LiveFuturesSettings(tickers=["CL", "RB", "NG", "GC", "SI"],
+                               exchange="NYMEX",
+                               bar_size=5,
+                               whatToShow="TRADES",
+                               influx_measurement="futures_5_sec_bars",
+                               log_filename="get_live_futures")
+
+
+def get_live_futures_cfe_settings():
+    return LiveFuturesSettings(tickers=["VIX"],
+                               exchange="CFE",
+                               bar_size=5,
+                               whatToShow="TRADES",
+                               influx_measurement="futures_5_sec_bars_test",
+                               log_filename="get_live_futures")
+
+
+def get_live_futures_ecbot_settings():
+    LiveFuturesSettings(tickers=["ZS", "ZL", "ZB", "ZF", "YM"],
+                        exchange="ECBOT",
+                        bar_size=5,
+                        whatToShow="TRADES",
+                        influx_measurement="futures_5_sec_bars",
+                        log_filename="get_live_futures")
+
+    async def my_main(ib):
+        try:
+            tasks = [FirstTimestampGetter(ib, get_first_timestamp_settings()).get_first_trade_date(),
+                    OptionDailyBarGetter(ib, get_option_bar_getter_settings()).get_daily_bars(),
+                    OptionTickGetter(ib, get_option_tick_getter_settings()).get_ticks(),
+                    OptionDailyBarUpdater(ib, get_option_bar_updater_settings()).update_daily_bars(),
+                    HistoricalEquityBarGetter(ib, "3_minutes").get_historical_equity_bars(),
+                    HistoricalEquityBarGetter(ib, "1_second").get_historical_equity_bars()]
+                    HistoricalEquityBarGetter(ib, "1_second").get_historical_equity_bars()]
+
+            tasks = [
+                LiveFuturesGetter(ib, get_live_futures_globex_settings()).get_live_futures(),
+                LiveFuturesGetter(ib, get_live_futures_ecbot_settings()).get_live_futures(),
+                LiveFuturesGetter(ib, get_live_futures_nymex_settings()).get_live_futures(),
+                LiveFuturesGetter(ib, get_live_futures_cfe_settings()).get_live_futures()]
+
         await asyncio.gather(*tasks)
-    except ValueError:
-        print("Arrived here")
 
+except ValueError as e:
+print(f"Arrived here {e}")
 
 if __name__ == '__main__':
     start_time = time.time()

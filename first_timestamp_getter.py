@@ -7,19 +7,23 @@ from sqlalchemy import update
 from util import connection as db
 import util.logging as my_log
 import logging
+from collections import namedtuple
 
-FIRST_TIMESTAMP_GETTER = 1
+
+FirstTimestampSettings = namedtuple('FirstTimestampSettings',
+                             'log_filename,')
 
 class FirstTimestampGetter:
-    def __init__(self, ib, requests):
-        self.logger = my_log.SetupLogger("get_option_first_timestamp")
+    def __init__(self, ib, settings: FirstTimestampSettings):
+        self.settings = settings
+        self.logger = my_log.SetupLogger(self.settings.log_filename)
         self.logger.setLevel(logging.INFO)
         self.logger.info("now is %s", datetime.datetime.now())
 
         self.contract_data = self.get_first_trade_date_df()
         self.ib = ib
         self.first_trade_date_sema = asyncio.Semaphore(1)
-        self.requests = requests
+        self.request_ids = []
 
     @staticmethod
     def set_cant_get_timestamp_flag(conId):
@@ -31,7 +35,7 @@ class FirstTimestampGetter:
 
         my_con = Option(conId=contract.conId, exchange=contract.exchange)
         try:
-            self.requests[self.ib.client._reqIdSeq] = FIRST_TIMESTAMP_GETTER
+            self.request_ids.append(self.ib.client._reqIdSeq)
             first_date = await self.ib.reqHeadTimeStampAsync(contract=my_con, whatToShow="TRADES", useRTH=False, formatDate=2)
         except ValueError as e:
             if str(e) == "time data '-9223372036854775' does not match format '%Y%m%d  %H:%M:%S'":

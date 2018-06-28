@@ -1,5 +1,6 @@
 import datetime
 import time
+from typing import Any
 
 import pandas as pd
 from ib_insync import *
@@ -10,40 +11,20 @@ import logging
 import asyncio
 from collections import namedtuple
 
+HistoricalEquityBarGetterSettings = namedtuple('HistoricalEquityBarGetterSettings',
+                             'db_table, influx_measurement, lookback_period, bar_size, skip_list, update_colname, retry_offsets, log_filename, sleep_duration')
+RetryOffset = namedtuple('RetryOffest', 'num_retries, offset')
 
 class HistoricalEquityBarGetter:
-    BarSettings = namedtuple('BarSettings',
-                             'db_table, influx_measurement, lookback_period, bar_size, skip_list, update_colname, retry_offsets, log_filename, sleep_duration')
-    RetryOffset = namedtuple('RetryOffest', 'num_retries, offset')
+    def __init__(self, ib: IB, settings: HistoricalEquityBarGetterSettings):
+        self.settings = settings
 
-    bar_settings_lookup = {
-        '3_minutes': BarSettings(db_table='stock_3_min_bars', influx_measurement='stock_3_min_bars',
-                                 lookback_period='20 D', bar_size='3 mins',
-                                 skip_list=["SPY", "QQQ", "EEM", "XLF", "GLD", "EFA", "IWM", "VXX", "FXI", "USO", "XOP",
-                                            "HYG", "AAPL", "BAC", "MU"],
-                                 update_colname='threeMinuteBarsLoadedOn',
-                                 retry_offsets=[RetryOffset(10, datetime.timedelta(minutes=5)),
-                                                RetryOffset(10, datetime.timedelta(hours=1)),
-                                                RetryOffset(10, datetime.timedelta(days=1))],
-                                 log_filename='get_historical_3_minute_bars',
-                                 sleep_duration=0),
-        '1_second': BarSettings(db_table='stock_1_sec_bars', influx_measurement='stock_1_sec_bars',
-                                lookback_period='2000 S', bar_size='1 secs', skip_list=[],
-                                update_colname='oneSecBarsLoadedOn',
-                                retry_offsets=[RetryOffset(10, datetime.timedelta(minutes=1)),
-                                               RetryOffset(10, datetime.timedelta(hours=1))],
-                                log_filename='get_historical_1_second_bars',
-                                sleep_duration=5)}
-
-    def __init__(self, ib, requests, bar_settings_key):
-        self.bar_settings = self.bar_settings_lookup[bar_settings_key]
-
-        self.logger = my_log.SetupLogger(self.bar_settings.log_filename)
+        self.logger = my_log.SetupLogger(self.settings.log_filename)
         self.logger.setLevel(logging.INFO)
         self.logger.info("now is %s", datetime.datetime.now())
 
         self.ib = ib
-        self.requests = requests
+        self.request_ids = []
 
         self.equity_historical_bar_sema = asyncio.Semaphore(1)
 
@@ -65,25 +46,25 @@ class HistoricalEquityBarGetter:
 
     def save_to_db(self, bars, conId):
         if not bars.empty:
-            bars.to_sql(self.bar_settings.db_table, db.engine, if_exists="append", index=False,
+            bars.to_sql(self.settings.db_table, db.engine, if_exists="append", index=False,
                         dtype={'date': TIMESTAMP(timezone=True)})
         else:
             print("Data frame was empty.")
 
         result = db.engine.execute(
             db.equity_contract_table.update().where(db.equity_contract_table.c.conId == conId).values(
-                {self.bar_settings.update_colname: datetime.datetime.now()}))
+                {self.settings.update_colname: datetime.datetime.now()}))
 
     async def save_to_influx(self, bars, contract):
         if not bars.empty:
             bars = bars.set_index('date')
             return await db.influx_client.write(bars,
-                                      measurement=self.bar_settings.influx_measurement,
+                                      measurement=self.settings.influx_measurement,
                                       symbol=contract.symbol,
                                       contractId=str(contract.conId))
 
     def get_historical_equity_contracts(self):
-        db_table_name = self.bar_settings.db_table
+        db_table_name = self.settings.db_table
         if db_table_name in db.meta.tables.keys():
             query = 'select e.symbol, e."conId", e."equityContractId", min(b.date) as date, priority ' \
                 'from equity_contracts e left join ' \
@@ -97,7 +78,7 @@ class HistoricalEquityBarGetter:
         return pd.read_sql(query, db.engine)
 
     def get_retry_offsets(self):
-        retry_offsets = self.bar_settings.retry_offsets
+        retry_offsets = self.settings.retry_offsets
         offsets_long = []
         for this_offset in retry_offsets:
             offsets_long += this_offset.num_retries * [this_offset.offset]
@@ -108,7 +89,7 @@ class HistoricalEquityBarGetter:
 
         for index, row in con_df.iterrows():
 
-            if row.symbol in self.bar_settings.skip_list:
+            if row.symbol in self.settings.skip_list:
                 continue
 
             my_con = Stock(conId=row.conId, exchange="SMART")
@@ -130,11 +111,12 @@ class HistoricalEquityBarGetter:
                 start_time = time.time()
                 try:
                     async with self.equity_historical_bar_sema:
+                        self.request_ids.append(self.ib.client._reqIdSeq)
                         bars = await self.ib.reqHistoricalDataAsync(
                             my_con,
                             endDateTime=dt,
-                            durationStr=self.bar_settings.lookback_period,
-                            barSizeSetting=self.bar_settings.bar_size,
+                            durationStr=self.settings.lookback_period,
+                            barSizeSetting=self.settings.bar_size,
                             whatToShow='TRADES',
                             useRTH=False,
                             formatDate=2)
@@ -155,7 +137,7 @@ class HistoricalEquityBarGetter:
                         continue
                     else:
                         self.logger.info(f"No more bars. Adding {row.symbol} to skip list.")
-                        self.bar_settings.skip_list.appen(row.symbol)
+                        self.settings.skip_list.appen(row.symbol)
                         break
 
                 dt = bars[0].date.strftime('%Y%m%d %H:%M:%S')
@@ -171,5 +153,8 @@ class HistoricalEquityBarGetter:
 
                 self.logger.info("Execution time was: {}".format(str(time.time() - start_time)))
 
-                await asyncio.sleep(self.bar_settings.sleep_duration)
+                await asyncio.sleep(self.settings.sleep_duration)
+
+    def __new__(cls) -> Any:
+        return super().__new__(cls)
 
