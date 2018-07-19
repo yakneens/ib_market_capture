@@ -25,6 +25,7 @@ has_color = 'rgba(76, 175, 80,1.0)'
 hasnt_color = 'rgba(255, 193, 7,1.0)'
 cant_color = 'rgba(156, 39, 176,1.0)'
 
+
 def unixTimeMillis(dt):
     return int(time.mktime(dt.timetuple()))
 
@@ -63,41 +64,56 @@ con_df = get_data()
 val_range = getMarks([con_df['expiryDate'].min(), con_df['expiryDate'].max()])
 interval_counter = 0
 
+layout = html.Div(className='container',
+                  children=[
+                      html.Nav(className='navbar navbar-expand-lg navbar-light bg-light nav-tabs nav-fill', children=[
+                          html.A('Timestamps By Date', href='/apps/contract_timestamps',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Timestamps By Symbol', href='/apps/contract_timestamps_by_symbol',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Timestamps By Date and Symbol', href='/apps/contract_timestamps_by_date_and_symbol',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars', href='/apps/daily_bars',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars By Date', href='/apps/daily_bars_by_date',
+                                 className='nav-item nav-link btn  btn-outline-success active'),
+                          html.A('Daily Bars By Date And Symbol', href='/apps/daily_bars_by_date_and_symbol',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                      ]),
 
-layout = html.Div([
-    dcc.Link('Contract Timestamps By Date', href='/apps/contract_timestamps'),
-    dcc.Link('Contract Timestamps By Symbol', href='/apps/contract_timestamps_by_symbol'),
-    html.Label('Daily Bars By Date'),
-    dcc.Link('Daily Bars', href='/apps/daily_bars'),
-    dcc.Checklist(
-        id='expiry-day-of-week',
-        options=[
-            {'label': 'Monday', 'value': 0},
-            {'label': 'Wednesday', 'value': 2},
-            {'label': 'Friday', 'value': 4}
-        ],
-        values=[0, 2, 4]
-    ),
-    dcc.Graph(
-        style={'height': 300},
-        id='bars-by-date'
-    ),
-    dcc.RangeSlider(
-        id='year-slider',
-        min=min(val_range.keys()),
-        max=max(val_range.keys()),
-        value=[unixTimeMillis(datetime.datetime.now() - timedelta(days=7)),
-               unixTimeMillis(datetime.datetime.now() + timedelta(weeks=8))],
-        step=None,
-        marks=val_range,
-    ),
-    dcc.Interval(
-        id='interval-component',
-        interval=60 * 1000,  # in milliseconds
-        n_intervals=0
-    ),
+                      dcc.Checklist(
+                          id='expiry-day-of-week',
+                          options=[
+                              {'label': 'Monday', 'value': 0},
+                              {'label': 'Wednesday', 'value': 2},
+                              {'label': 'Friday', 'value': 4}
+                          ],
+                          values=[0, 2, 4],
+                          labelClassName='checkbox-inline',
+                          inputClassName='checkbox'
+                      ),
+                      dcc.Graph(
+                          style={'height': 300},
+                          id='bars-by-date'
+                      ),
+                      dcc.RangeSlider(
+                          id='year-slider',
+                          min=min(val_range.keys()),
+                          max=max(val_range.keys()),
+                          value=[unixTimeMillis(datetime.datetime.now() - timedelta(days=7)),
+                                 unixTimeMillis(datetime.datetime.now() + timedelta(weeks=8))],
+                          step=None,
+                          marks=val_range,
+                      ),
+                      dcc.Interval(
+                          id='interval-component',
+                          interval=60 * 1000,  # in milliseconds
+                          n_intervals=0
+                      ),
 
-])
+                  ])
 
 
 def get_bars(my_data):
@@ -141,8 +157,8 @@ def get_bars(my_data):
 
 
 @app.callback(Output('bars-by-date', 'figure'), [Input('year-slider', 'value'),
-                                             Input('expiry-day-of-week', 'values'),
-                                             Input('interval-component', 'n_intervals')])
+                                                 Input('expiry-day-of-week', 'values'),
+                                                 Input('interval-component', 'n_intervals')])
 def update_figure(selected_dates, selected_expiry_days, n_intervals):
     con_df = get_data()
 

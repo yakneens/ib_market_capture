@@ -1,0 +1,10 @@
+.DateInput__input {
+    opacity: 1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 0;
+    height: 100%;
+    width: 100%;
+    padding-left: 10px;
+}

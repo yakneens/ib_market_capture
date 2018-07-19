@@ -1,4 +1,5 @@
 import plotly.graph_objs as go
+import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import pandas as pd
@@ -6,13 +7,13 @@ import numpy as np
 import datetime
 import time
 from dash.dependencies import Output, Input
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import MetaData
 from datetime import timedelta
 from app import app
 from dateutil.relativedelta import relativedelta, FR
-
+from datetime import datetime as dt
 engine = create_engine('postgresql://stocks:stocks@localhost:2345/option_price_tracking')
 connection = engine.connect()
 
@@ -26,179 +27,108 @@ hasnt_color = 'rgba(255, 193, 7,1.0)'
 cant_color = 'rgba(156, 39, 176,1.0)'
 
 
-def unixTimeMillis(dt):
-    return int(time.mktime(dt.timetuple()))
+def get_timestamp_data(selected_date):
+    query = 'select count(*), c.symbol, c."cantGetFirstTimestamp", ' \
+            't."firstTimestamp" is not null AS "hasTimestamp" ' \
+            'from contracts c left join contract_ib_first_timestamp t on c."conId" = t."contractId" ' \
+            'where c."lastTradeDateOrContractMonth"::date = \'{}\' ' \
+            'group by c.symbol, c."cantGetFirstTimestamp", "hasTimestamp" ' \
+            'order by c.symbol, "hasTimestamp"'.format(selected_date)
+
+    con_df = pd.read_sql(query, connection)
+    con_df.loc[con_df['hasTimestamp'].isna(), 'hasTimestamp'] = False
+    con_df.loc[con_df['cantGetFirstTimestamp'].isna(), 'cantGetFirstTimestamp'] = False
+    return con_df
+
+layout = html.Div(className='container',
+                  children=[
+                      html.Nav(className='navbar navbar-expand-lg navbar-light bg-light nav-tabs nav-fill', children=[
+                          html.A('Timestamps By Date', href='/apps/contract_timestamps',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Timestamps By Symbol', href='/apps/contract_timestamps_by_symbol',
+                                 className='nav-item nav-link btn btn-outline-success active'),
+                          html.A('Timestamps By Date and Symbol', href='/apps/contract_timestamps_by_date_and_symbol',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars', href='/apps/daily_bars',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars By Date', href='/apps/daily_bars_by_date',
+                                 className='nav-item nav-link btn  btn-outline-success'),
+                          html.A('Daily Bars By Date And Symbol', href='/apps/daily_bars_by_date_and_symbol',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                      ]),
+                      html.Div([
+                          html.Label("Expiry Date:", htmlFor="date-picker", className='form-check-label'),
+                          html.Div([
+                              dcc.DatePickerSingle(
+                                  id='date-picker',
+                                  min_date_allowed=dt(2018, 6, 15),
+                                  max_date_allowed=dt(2030, 12, 31),
+                                  initial_visible_month=dt.now(),
+                                  date=dt.now() + relativedelta(weekday=FR(+1)),
+                              ),
+
+                          ], className='form-check'),
+                      ], className='form-check-inline col-auto'),
+
+                      dcc.Graph(
+                          style={'height': 300, },
+                          id='my-timestamp-graph'
+                      ),
+                      dcc.Interval(
+                          id='interval-component',
+                          interval=600 * 1000,  # in milliseconds
+                          n_intervals=0
+                      )
+
+                  ])
 
 
-def unixToDatetime(unix):
-    return pd.to_datetime(unix, unit='s')
-
-
-def get_dates():
-    query = 'select distinct "lastTradeDateOrContractMonth"::date from contracts order by "lastTradeDateOrContractMonth"'
-    date_df = pd.read_sql(query, connection, parse_dates=["lastTradeDateOrContractMonth"]).query(
-        'lastTradeDateOrContractMonth < 2019')
-    return date_df.lastTradeDateOrContractMonth
-
-
-def getMarks():
-    my_dates = get_dates()
-    result = {}
-    next_friday = datetime.datetime.now().date() + relativedelta(weekday=FR(+1))
-    selected_index = 0
-    for i, date in my_dates.iteritems():
-        result[i] = {"label": str(date.strftime('%d-%b-%y')),
-                     "style": {"transform": "rotate(90deg)",
-                               "white-space": "nowrap",
-                               "margin-top": "2%"}}
-        if date.date() == next_friday:
-            selected_index = i
-
-    return (selected_index, result)
-
-
-def get_points(my_data):
-    # has_c = my_data.query('hasTimestamp == True & right == "C"')
-    # hasnt_c = my_data.query('cantGetFirstTimestamp != True & hasTimestamp != True & right == "C"')
-    # cant_c = my_data.query('cantGetFirstTimestamp == True & right == "C"')
-    #
-
-    has_marker = {'color': f'{has_color}', 'size': 5, 'symbol': 'square'}
-    hasnt_marker = {'color': f'{hasnt_color}', 'size': 5, 'symbol': 'square'}
-    cant_marker = {'color': f'{cant_color}', 'size': 5, 'symbol': 'square'}
-
-    my_data['marker'] = np.select(
-        [my_data.hasTimestamp == True,
-         (my_data.cantGetFirstTimestamp != True) & (my_data.hasTimestamp != True),
-         my_data.cantGetFirstTimestamp == True],
-        [has_marker, hasnt_marker, cant_marker], np.nan)
-
-
-    has = my_data.query('hasTimestamp == True')
-    hasnt = my_data.query('cantGetFirstTimestamp != True & hasTimestamp != True')
-    cant = my_data.query('cantGetFirstTimestamp == True')
-
+def get_timestamp_bars(my_data, selected_date):
     trace = [
-        go.Scatter(
-            x=has.strike,
-            y=has.lastTradeDateOrContractMonth,
-            name='Has',
-            marker=has_marker,
-            mode='markers'
+        go.Bar(
+            x=my_data.query('hasTimestamp == True')[
+                'symbol'],
+            y=my_data.query('hasTimestamp == True')['count'],
+            name='Has Timestamp',
+            marker=go.Marker(color=has_color),
+            # , line=dict(color='rgb(0, 0, 0)',width=1)
         ),
-        go.Scatter(
-            x=hasnt.strike,
-            y=hasnt.lastTradeDateOrContractMonth,
-            name='Hasn\'t',
-            marker=hasnt_marker,
-            mode='markers'
-        ),
-        go.Scatter(
-            x=cant.strike,
-            y=cant.lastTradeDateOrContractMonth,
-            name='Can\'t',
-            marker=cant_marker,
-            mode='markers'
+        go.Bar(
+            x=my_data.query('cantGetFirstTimestamp != True & hasTimestamp != True')[
+                'symbol'],
+            y=my_data.query('cantGetFirstTimestamp != True & hasTimestamp != True')['count'],
+            name='No Timestamp',
+            marker=go.Marker(color=hasnt_color),
         ),
 
-        # go.Bar(
-        #     x=my_data.query('hasTimestamp == True')[
-        #         'expiryDate'],
-        #     y=my_data.query('hasTimestamp == True')['count'],
-        #     name='Has Timestamp',
-        #     marker=go.Marker(color=has_color),
-        # ),
-        # go.Bar(
-        #     x=my_data.query('cantGetFirstTimestamp == True')['expiryDate'],
-        #     y=my_data.query('cantGetFirstTimestamp == True')['count'],
-        #     name='Can\'t Get Timestamp',
-        #     marker=go.Marker(color=cant_color),
-        # ),
+        go.Bar(
+            x=my_data.query('cantGetFirstTimestamp == True')['symbol'],
+            y=my_data.query('cantGetFirstTimestamp == True')['count'],
+            name='Can\'t Get Timestamp',
+            marker=go.Marker(color=cant_color),
+        ),
     ]
 
     return {
         'data': trace,
         'layout': go.Layout(
-            title='Count of timestamps by expiry date',
-            showlegend=True,
+            title=f'Timestamps by symbol - {selected_date.strftime("%d %b %Y")}',
+            showlegend=False,
             legend=go.Legend(
                 x=0,
                 y=1.0
             ),
-            margin=go.Margin(l=100, r=40, t=40, b=30),
-            yaxis={
-                "type": 'category',
-                "title": 'Expiry Date'}
+            margin=go.Margin(l=40, r=40, t=40, b=30),
+            barmode='relative',
+            barnorm='percent'
         )
     }
 
 
-def get_data(right, symbol):
-    query = 'select c.right, c.strike, c."cantGetFirstTimestamp", c."lastTradeDateOrContractMonth"::date, ' \
-            't."firstTimestamp" is not null AS "hasTimestamp" ' \
-            'from contracts c left join contract_ib_first_timestamp t on c."conId" = t."contractId" ' \
-            'where c.symbol=\'{}\' and c.right=\'{}\'  ' \
-            'order by c."lastTradeDateOrContractMonth"::date, c.right, c.strike '.format(symbol, right)
-
-    # 'where c.symbol = \'SPY\' and c."lastTradeDateOrContractMonth"::date in (\'20180713\', \'20180716\',\'20180720\') ' \
-
-    con_df = pd.read_sql(query, connection, parse_dates=["lastTradeDateOrContractMonth"])
-    # con_df['expiryDate'] = con_df['lastTradeDateOrContractMonth'].apply(
-    #     lambda x: x.replace(hour=0, minute=0, second=0, microsecond=0))
-    con_df.loc[con_df['cantGetFirstTimestamp'].isna(), 'cantGetFirstTimestamp'] = False
-    con_df.loc[con_df['hasTimestamp'].isna(), 'hasTimestamp'] = False
-    # grouped = con_df.groupby(['expiryDate', 'hasTimestamp', 'cantGetFirstTimestamp'], as_index=False)
-    # con_df = grouped.sum()
-
-    dates = sorted(set(con_df.lastTradeDateOrContractMonth))
-    date_lookup = {date: ind for ind, date in enumerate(dates)}
-    con_df['ind'] = [date_lookup[my_key] for my_key in con_df.lastTradeDateOrContractMonth]
-
-
-    return con_df
-
-
-(selected_date_index, marks) = getMarks()
-
-layout = html.Div([
-    dcc.Link('Contract Timestamps By Date', href='/apps/contract_timestamps'),
-    html.Label('Contract Timestamps By Symbol'),
-    dcc.Link('Daily Bars By Date', href='/apps/daily_bars_by_date'),
-    dcc.Link('Daily Bars', href='/apps/daily_bars'),
-    dcc.RadioItems(
-        id='right',
-        options=[
-            {'label': 'Calls', 'value': 'C'},
-            {'label': 'Puts', 'value': 'P'},
-        ],
-        value='C'
-    ),
-    dcc.Dropdown(
-        id='symbol',
-        options=[
-            {'label': 'SPY', 'value': 'SPY'},
-            {'label': 'QQQ', 'value': 'QQQ'},
-            {'label': 'ES', 'value': 'ES'}
-        ],
-        value='SPY'
-    ),
-    dcc.Graph(
-        style={'height': 500},
-        id='my-timestamp-by-symbol-graph',
-    ),
-    dcc.Interval(
-        id='interval-component',
-        interval=60 * 1000,  # in milliseconds
-        n_intervals=0
-    ),
-
-])
-
-
-@app.callback(Output('my-timestamp-by-symbol-graph', 'figure'), [Input('right', 'value'),
-                                                                 Input('symbol', 'value'),
-                                                                 Input('interval-component', 'n_intervals')])
-def update_timestamp_figure(right, symbol, n_intervals):
-    print('hello')
-    con_df = get_data(right, symbol)
-    return get_points(con_df)
+@app.callback(Output('my-timestamp-graph', 'figure'), [Input('date-picker', 'date'),
+                                                       Input('interval-component', 'n_intervals')])
+def update_timestamp_figure(date, n_intervals):
+    con_df = get_timestamp_data(date)
+    return get_timestamp_bars(con_df, dt.strptime(date.split(" ")[0], '%Y-%m-%d'))
