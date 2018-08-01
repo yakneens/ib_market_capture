@@ -56,13 +56,14 @@ def get_data():
     #     lambda x: x.replace(hour=0, minute=0, second=0, microsecond=0))
     con_df.loc[con_df['cantGetFirstTimestamp'].isna(), 'cantGetFirstTimestamp'] = False
     con_df.loc[con_df['hasTimestamp'].isna(), 'hasTimestamp'] = False
+    con_df['count'] = con_df['count'].astype(int)
     # grouped = con_df.groupby(['expiryDate', 'hasTimestamp', 'cantGetFirstTimestamp'], as_index=False)
     # con_df = grouped.sum()
 
     return con_df
 
 
-# Set upper limit to 2021 because otherwise the scale has too many values
+# Set upper limimoust to 2021 because otherwise the scale has too many values
 con_df = get_data().query('expiryDate < 2021')
 val_range = getMarks([con_df['expiryDate'].min(), con_df['expiryDate'].max()])
 interval_counter = 0
@@ -83,6 +84,8 @@ layout = html.Div(className='container',
                           html.A('Daily Bars By Date And Symbol', href='/apps/daily_bars_by_date_and_symbol',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
                                  className='nav-item nav-link btn btn-outline-success'),
                       ]),
                       dcc.Checklist(

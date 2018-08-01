@@ -81,16 +81,20 @@ layout = html.Div(className='container',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
                                  className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
+                                 className='nav-item nav-link btn btn-outline-success'),
                       ]),
 
                       dcc.Checklist(
                           id='expiry-day-of-week',
                           options=[
                               {'label': 'Monday', 'value': 0},
+                              {'label': 'Tuesday', 'value': 1},
                               {'label': 'Wednesday', 'value': 2},
+                              {'label': 'Thursday', 'value': 3},
                               {'label': 'Friday', 'value': 4}
                           ],
-                          values=[0, 2, 4],
+                          values=[0, 1, 2, 3, 4],
                           labelClassName='checkbox-inline',
                           inputClassName='checkbox'
                       ),

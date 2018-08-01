@@ -60,6 +60,8 @@ layout = html.Div(className='container',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
                                  className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
+                                 className='nav-item nav-link btn btn-outline-success'),
                       ]),
                       html.Div([
                           html.Label("Expiry Date:", htmlFor="date-picker", className='form-check-label'),
@@ -133,4 +135,4 @@ def get_daily_bar_bars(my_data, selected_date):
                                                        Input('interval-component', 'n_intervals')])
 def update_daily_bar_figure(date, n_intervals):
     con_df = get_daily_bar_data(date)
-    return get_daily_bar_bars(con_df, dt.strptime(date.split(" ")[0], '%Y-%M-%d'))
+    return get_daily_bar_bars(con_df, dt.strptime(date.split(" ")[0], '%Y-%m-%d'))

@@ -167,6 +167,8 @@ layout = html.Div(className='container',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
                                  className='nav-item nav-link btn active btn-outline-success'),
+                          html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
+                                 className='nav-item nav-link btn btn-outline-success'),
                       ]),
                       html.Div([
                           html.Label("Expiry Date:", htmlFor="date-picker", className='form-check-label'),

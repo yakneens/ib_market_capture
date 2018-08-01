@@ -4,7 +4,8 @@ from dash.dependencies import Input, Output
 
 from app import app
 from apps import contract_timestamps, daily_bars, daily_bars_by_date, contract_timestamps_by_symbol, \
-    daily_bars_by_date_and_symbol, contract_timestamps_by_date_and_symbol,daily_bars_by_symbol_and_strike
+    daily_bars_by_date_and_symbol, contract_timestamps_by_date_and_symbol, daily_bars_by_symbol_and_strike, \
+    daily_bars_candle, ticks
 
 app.layout = html.Div([
     html.Link(href='/static/bootstrap-4.1.2-dist/css/bootstrap.min.css', rel='stylesheet'),
@@ -32,6 +33,10 @@ def display_page(pathname):
         return daily_bars_by_date_and_symbol.layout
     elif pathname == '/apps/daily_bars_by_symbol_and_strike':
         return daily_bars_by_symbol_and_strike.layout
+    elif pathname == '/apps/daily_bars_candle':
+        return daily_bars_candle.layout
+    elif pathname == '/apps/ticks':
+        return ticks.layout
     else:
         return '404'
 

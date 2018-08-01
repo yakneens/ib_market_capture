@@ -14,6 +14,7 @@ from datetime import timedelta
 from app import app
 from dateutil.relativedelta import relativedelta, FR
 from datetime import datetime as dt
+
 engine = create_engine('postgresql://stocks:stocks@localhost:2345/option_price_tracking')
 connection = engine.connect()
 
@@ -40,6 +41,7 @@ def get_timestamp_data(selected_date):
     con_df.loc[con_df['cantGetFirstTimestamp'].isna(), 'cantGetFirstTimestamp'] = False
     return con_df
 
+
 layout = html.Div(className='container',
                   children=[
                       html.Nav(className='navbar navbar-expand-lg navbar-light bg-light nav-tabs nav-fill', children=[
@@ -56,6 +58,8 @@ layout = html.Div(className='container',
                           html.A('Daily Bars By Date And Symbol', href='/apps/daily_bars_by_date_and_symbol',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
                                  className='nav-item nav-link btn btn-outline-success'),
                       ]),
                       html.Div([
