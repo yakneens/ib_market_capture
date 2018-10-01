@@ -59,7 +59,7 @@ def get_symbols():
 
 layout = html.Div(className='container',
                   children=[
-                      html.Nav(className='navbar navbar-expand-lg navbar-light bg-light nav-tabs nav-fill', children=[
+                      html.Nav(className='navbar navbar-light bg-light nav-tabs  nav-fill', children=[
                           html.A('Timestamps By Date', href='/apps/contract_timestamps',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Timestamps By Symbol', href='/apps/contract_timestamps_by_symbol',
@@ -76,6 +76,9 @@ layout = html.Div(className='container',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
                                  className='nav-item nav-link btn active btn-outline-success'),
+                          html.A('Ticks', href='/apps/ticks',
+                                 className='nav-item nav-link btn btn-outline-success'),
+
                       ]),
                       html.Div([
                           html.Label("Symbol:", htmlFor="symbol", className='form-check-label'),
@@ -232,7 +235,21 @@ def update_bars_figure(right, symbol, n_intervals, date, strike):
         )
         layout['margin'] = go.Margin(l=100, r=40, t=40, b=30)
 
+        layout['yaxis1']['title'] = 'Price'
+        layout['yaxis1']['autorange'] = True
+        layout['yaxis1']['showticklabels'] = True
+        layout['yaxis1']['automargin'] = True
+        layout['yaxis1']['hoverformat'] = '$,2f'
+        layout['yaxis1']['tickformat'] = '$,2f'
+        layout['yaxis1']['fixedrange'] = True
+
+        layout['yaxis3']['title'] = 'Volume'
+        layout['yaxis3']['autorange'] = True
+        layout['yaxis3']['showticklabels'] = True
+
         fig['layout'] = layout
+
+
 
         fig.append_trace(my_points['data'][0], 1, 1)
         fig.append_trace(my_points['data'][1], 3, 1)

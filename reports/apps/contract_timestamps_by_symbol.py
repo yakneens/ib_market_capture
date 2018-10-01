@@ -44,7 +44,7 @@ def get_timestamp_data(selected_date):
 
 layout = html.Div(className='container',
                   children=[
-                      html.Nav(className='navbar navbar-expand-lg navbar-light bg-light nav-tabs nav-fill', children=[
+                      html.Nav(className='navbar navbar-light bg-light nav-tabs  nav-fill', children=[
                           html.A('Timestamps By Date', href='/apps/contract_timestamps',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Timestamps By Symbol', href='/apps/contract_timestamps_by_symbol',
@@ -60,6 +60,8 @@ layout = html.Div(className='container',
                           html.A('Daily Bars By Symbol And Strike', href='/apps/daily_bars_by_symbol_and_strike',
                                  className='nav-item nav-link btn btn-outline-success'),
                           html.A('Daily Bars Candlestick', href='/apps/daily_bars_candle',
+                                 className='nav-item nav-link btn btn-outline-success'),
+                          html.A('Ticks', href='/apps/ticks',
                                  className='nav-item nav-link btn btn-outline-success'),
                       ]),
                       html.Div([

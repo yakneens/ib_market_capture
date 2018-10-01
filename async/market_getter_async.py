@@ -1,18 +1,12 @@
-import datetime
-import time
-
-import pandas as pd
 from ib_insync import *
 from sqlalchemy import update
-from util import connection as db
-from first_timestamp_getter import FirstTimestampGetter, FirstTimestampSettings
-from option_daily_bar_getter import OptionDailyBarGetter, OptionBarGetterSettings
-from option_tick_getter import OptionTickGetter, OptionTickGetterSettings
-from option_daily_bar_updater import OptionDailyBarUpdater, OptionBarUpdaterSettings
-from historical_equity_bar_getter import *
-from live_futures_getter import LiveFuturesGetter, LiveFuturesSettings
+from async.first_timestamp_getter import FirstTimestampGetter, FirstTimestampSettings
+from async.option_daily_bar_getter import OptionBarGetterSettings
+from async.option_tick_getter import OptionTickGetterSettings
+from async.option_daily_bar_updater import OptionBarUpdaterSettings
+from async.historical_equity_bar_getter import *
+from async.live_futures_getter import LiveFuturesSettings
 import os
-import random
 import asyncio
 
 
@@ -20,6 +14,8 @@ def init_ib():
     ib = IB()
     ib.errorEvent += onError
     IB_PORT = os.environ.get("IB_PORT")
+    if not IB_PORT:
+        IB_PORT = '4003'
     ib.connect('127.0.0.1', IB_PORT, clientId=1337)
     return ib
 
@@ -41,7 +37,12 @@ def onError(reqId, errorCode, errorString, contract):
 
 
 def get_first_timestamp_settings():
-    return FirstTimestampSettings(log_filename="get_option_first_timestamp")
+    return FirstTimestampSettings(log_filename="get_option_first_timestamp",
+                                  start_cutoff=25,
+                                  end_cutoff=1200,
+                                  last_load=4,
+                                  cant_get_timestamp="true",
+                                  date_order="ASC")
 
 
 def get_option_bar_getter_settings():
@@ -144,16 +145,17 @@ def get_live_futures_ecbot_settings():
 
 async def my_main(ib):
     try:
-        tasks = [HistoricalEquityBarGetter(ib, get_historical_3_minute_settings()).get_historical_equity_bars(),
-                 OptionTickGetter(ib, get_option_tick_getter_settings()).get_ticks(),
-                 OptionDailyBarGetter(ib, get_option_bar_getter_settings()).get_daily_bars(),
-                 OptionDailyBarUpdater(ib, get_option_bar_updater_settings()).update_daily_bars(),
-                 FirstTimestampGetter(ib, get_first_timestamp_settings()).get_first_trade_date(),
-                 LiveFuturesGetter(ib, get_live_futures_globex_settings()).get_live_futures(),
-                 LiveFuturesGetter(ib, get_live_futures_ecbot_settings()).get_live_futures(),
-                 LiveFuturesGetter(ib, get_live_futures_nymex_settings()).get_live_futures(),
-                 LiveFuturesGetter(ib, get_live_futures_cfe_settings()).get_live_futures(),
-                 HistoricalEquityBarGetter(ib, get_historical_1_second_settings()).get_historical_equity_bars()]
+        # tasks = [HistoricalEquityBarGetter(ib, get_historical_3_minute_settings()).get_historical_equity_bars(),
+        #          OptionTickGetter(ib, get_option_tick_getter_settings()).get_ticks(),
+        #          OptionDailyBarGetter(ib, get_option_bar_getter_settings()).get_daily_bars(),
+        #          OptionDailyBarUpdater(ib, get_option_bar_updater_settings()).update_daily_bars(),
+        #          FirstTimestampGetter(ib, get_first_timestamp_settings()).get_first_trade_date(),
+        #          LiveFuturesGetter(ib, get_live_futures_globex_settings()).get_live_futures(),
+        #          LiveFuturesGetter(ib, get_live_futures_ecbot_settings()).get_live_futures(),
+        #          LiveFuturesGetter(ib, get_live_futures_nymex_settings()).get_live_futures(),
+        #          LiveFuturesGetter(ib, get_live_futures_cfe_settings()).get_live_futures(),
+        #          HistoricalEquityBarGetter(ib, get_historical_1_second_settings()).get_historical_equity_bars()]
+        tasks = [FirstTimestampGetter(ib, get_first_timestamp_settings()).get_first_trade_date()]
         await asyncio.gather(*tasks)
 
     except ValueError as e:
@@ -162,7 +164,19 @@ async def my_main(ib):
 
 if __name__ == '__main__':
     start_time = time.time()
-    ib = init_ib()
-    asyncio.ensure_future(my_main(ib, ))
-    IB.run()
+    while True:
+        try:
+            ib = init_ib()
+            asyncio.ensure_future(my_main(ib, ))
+            ib.run()
+            break
+        except asyncio.TimeoutError as e:
+            print("Asyncio timeout")
+            time.sleep(60)
+            continue
+        except OSError as e:
+            print("Can't connect. Retrying after 60 seconds")
+            time.sleep(60)
+            continue
+
     print("Execution time was: {}".format(str(time.time() - start_time)))
